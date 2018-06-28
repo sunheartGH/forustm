@@ -106,6 +106,34 @@ impl Section {
             Ok(vec![])
         }
     }
+
+    pub fn query_with_redis_queue_paging(
+        conn: &PgConnection,
+        redis_pool: &Arc<RedisPool>,
+        key: &'static str,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<Self>, i64), String> {
+        if redis_pool.exists(key) {
+            let section_ids_string = redis_pool.lrange::<Vec<String>>(key,  -page * page_size, -((page - 1) * page_size + 1));
+            let section_ids_len: i64 = redis_pool.llen(key);
+            let section_ids: Vec<Uuid> = section_ids_string
+                .into_iter()
+                .map(|id_str| id_str.parse::<Uuid>().unwrap())
+                .collect();
+
+            let res = all_sections
+                .filter(section::status.eq(0))
+                .filter(section::id.eq(any(section_ids)))
+                .get_results::<Self>(conn);
+            match res {
+                Ok(data) => Ok((data, section_ids_len)),
+                Err(err) => Err(format!("{}", err)),
+            }
+        } else {
+            Ok((vec![], 0))
+        }
+    }
 }
 
 #[derive(Insertable, Debug, Clone, Deserialize, Serialize)]
